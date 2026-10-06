@@ -22,6 +22,7 @@ const state = {
   recipient: null, // 받는 사람 id (cards.json partners)
   fields: {},
   followups: {},
+  typoKept: {}, // 오타 제안에서 [그대로 두기]를 누른 낱말 (칸키 → 낱말 목록) · 새로 정리하면 비운다
   variants: [],
   reasons: [],
   activeVariant: 0,
@@ -218,6 +219,7 @@ async function submitHome() {
     const result = await structurize(card, state.input);
     state.fields = result.fields;
     state.followups = result.followups;
+    state.typoKept = {};
     state.recipient = null;
     state.variants = []; // 새로 정리하면 이전 결과로 돌아가지 않게 비운다
     renderStructure();
@@ -270,6 +272,7 @@ function renderStructure() {
     textarea.addEventListener("input", () => {
       state.fields[field.key] = textarea.value;
       updateFieldState(field);
+      renderTypos(field);
       updateMakeButton();
     });
 
@@ -277,9 +280,16 @@ function renderStructure() {
     hint.className = "field-hint";
     hint.id = `hint-${field.key}`;
 
-    wrap.append(label, textarea, hint);
+    // 오타 제안: 자동으로 고치지 않고 [고치기]를 눌러야 칸 값이 바뀐다
+    const typos = document.createElement("div");
+    typos.className = "typo-list";
+    typos.id = `typos-${field.key}`;
+    typos.setAttribute("aria-live", "polite");
+
+    wrap.append(label, textarea, hint, typos);
     list.appendChild(wrap);
     updateFieldState(field);
+    renderTypos(field);
   });
 
   updateMakeButton();
@@ -313,6 +323,58 @@ function updateFieldState(field) {
 
   wrap.classList.toggle("missing", missing);
   hint.textContent = missing ? state.followups[field.key] || field.followUp : "";
+}
+
+// 칸 값의 오타 제안을 칸 아래에 보여 준다. [고치기] = 칸 값을 바꿈 · [그대로 두기] = 이 낱말은 다시 제안하지 않음
+function renderTypos(field) {
+  const box = $(`typos-${field.key}`);
+  if (!box) return;
+  box.innerHTML = "";
+  const kept = state.typoKept[field.key] || [];
+  const typos = findTypos(state.fields[field.key]).filter((typo) => !kept.includes(typo.word));
+  if (!typos.length) return;
+
+  const title = document.createElement("p");
+  title.className = "typo-title";
+  title.textContent = UI_TEXT.typoPrompt;
+  box.appendChild(title);
+
+  typos.forEach((typo) => {
+    const row = document.createElement("div");
+    row.className = "typo-item";
+
+    const text = document.createElement("span");
+    text.className = "typo-text";
+    const from = document.createElement("s");
+    from.textContent = typo.word;
+    const to = document.createElement("strong");
+    to.textContent = typo.fixedWord;
+    text.append(from, " → ", to);
+
+    const apply = document.createElement("button");
+    apply.type = "button";
+    apply.className = "link-button typo-apply";
+    apply.textContent = UI_TEXT.typoApply;
+    apply.addEventListener("click", () => {
+      state.fields[field.key] = applyTypo(state.fields[field.key], typo);
+      $(`field-${field.key}`).value = state.fields[field.key];
+      updateFieldState(field);
+      renderTypos(field);
+      updateMakeButton();
+    });
+
+    const keep = document.createElement("button");
+    keep.type = "button";
+    keep.className = "link-button";
+    keep.textContent = UI_TEXT.typoKeep;
+    keep.addEventListener("click", () => {
+      state.typoKept[field.key] = [...kept, typo.word];
+      renderTypos(field);
+    });
+
+    row.append(text, apply, keep);
+    box.appendChild(row);
+  });
 }
 
 function updateMakeButton() {

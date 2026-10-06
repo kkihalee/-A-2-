@@ -530,7 +530,8 @@ function polishText(text, form) {
     FIRST_PERSON_POLITE.forEach(([from, to]) => {
       out = out.replace(new RegExp(`(^|[\\s"'(])${from}(?=[\\s,.?!]|$)`, "g"), `$1${to}`);
     });
-    out = out.replace(/(^|[\s"'(])내(?= )/g, "$1제"); // 내 판단 → 제 판단
+    // 내 판단 → 제 판단. 단 동사 '내다'(시간 내 주셔서 · 시간 내 드려)는 바꾸지 않는다 (10/06)
+    out = out.replace(/(^|[\s"'(])내(?= (?!주|줘|드리|드려|드릴|봐|볼|봤|놓|둬|두))/g, "$1제");
   }
   return out;
 }
@@ -606,6 +607,60 @@ function renderBullet(raw) {
   let value = cleanValue(raw);
   if (classifyValue(value) === "question" && !/[?!]$/.test(value)) value += "?"; // 물음표 없는 질문
   return { text: value, evidence: value.replace(/[?!]+$/, "") };
+}
+
+// 더 간결하게의 첫 문장: 상황 칸을 "~해서 질문드립니다."처럼 구어체 한 문장으로 (10/06)
+//   메모체: 해요체로 바꾼 뒤 '요'를 '서'로 (헷갈려요 → 헷갈려서). 과거형(했어요·됐어요)은 '~서'가 어색하므로 두 문장으로.
+//   임(중임 등): 이라서/라서 · 명사구: "~ 관련해서" · 완성 문장·질문·"~지"형: 그 문장 + ask
+function conciseLeadSentence(step, raw, form, ask) {
+  const shape = classifyValue(raw);
+  const value = cleanValue(raw);
+  if (shape === "memo") {
+    const rule = memoRuleFor(value);
+    if (rule && rule.copula) {
+      const stem = value.slice(0, -rule.suffix.length);
+      return `${stem}${hasBatchim(stem) ? "이라서" : "라서"} ${ask}.`;
+    }
+    const haeyo = toPredicate(value, 1, true).text;
+    if (/요$/.test(haeyo) && !/(?:(?:었|았|했|됐|봤|였|겠)어|이에|예)요$/.test(haeyo)) return `${haeyo.slice(0, -1)}서 ${ask}.`;
+  }
+  if (shape === "noun") return `${value} 관련해서 ${ask}.`;
+  if (shape === "ji") return `${value} 궁금해서 ${ask}.`;
+  return `${renderStep(step, raw, form, 0).text} ${ask}.`;
+}
+
+// ---------- 오타 제안 (화면 2) ----------
+// 칸 값에서 TYPO_RULES(content.js)에 맞는 곳을 찾는다. 고치지는 않는다.
+// 반환: [{ index, from, to, word, fixedWord }] — word/fixedWord는 화면에 보여 줄 낱말 단위 (조회서릉 → 조회서를)
+function findTypos(text) {
+  const src = String(text || "");
+  const found = [];
+  TYPO_RULES.forEach((rule) => {
+    const flags = rule.re.flags.replace("g", "");
+    for (const m of src.matchAll(new RegExp(rule.re.source, `${flags}g`))) {
+      const to = typeof rule.to === "function" ? rule.to(...m) : m[0].replace(new RegExp(rule.re.source, flags), rule.to);
+      if (!to || to === m[0]) continue;
+      if (found.some((f) => m.index < f.index + f.from.length && f.index < m.index + m[0].length)) continue; // 겹치면 먼저 찾은 것만
+      const start = src.slice(0, m.index).search(/\S+$/);
+      const wordStart = start === -1 ? m.index : start;
+      const after = src.slice(m.index + m[0].length).match(/^[^\s,.?!]*/)[0];
+      found.push({
+        index: m.index,
+        from: m[0],
+        to,
+        word: src.slice(wordStart, m.index + m[0].length) + after,
+        fixedWord: src.slice(wordStart, m.index) + to + after,
+      });
+    }
+  });
+  return found.sort((a, b) => a.index - b.index);
+}
+
+// 제안 하나를 칸 값에 적용한다. 그사이 글이 바뀌었으면 같은 글자를 처음 나오는 곳에서 바꾼다.
+function applyTypo(text, typo) {
+  const src = String(text || "");
+  if (src.substr(typo.index, typo.from.length) === typo.from) return src.slice(0, typo.index) + typo.to + src.slice(typo.index + typo.from.length);
+  return src.replace(typo.from, typo.to);
 }
 
 // 피하고 싶은 표현: 쉼표·줄바꿈으로 나눠 적은 목록
@@ -719,16 +774,20 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
     profile.sentenceLength === "short" ? null : closing(requestStyle),
   ]);
 
-  // 더 간결하게: 칸 이름과 값만 항목으로 (질문은 마지막 줄)
-  const bulletKeys = [...steps.map((step) => step.key), tailStep && tailStep.key].filter(Boolean);
+  // 더 간결하게: 첫 칸(CONCISE_LEAD)은 구어체 첫 문장으로, 나머지는 칸 이름과 값만 항목으로 (질문은 마지막 줄)
+  const leadInfo = CONCISE_LEAD[card.id];
+  const leadStep = leadInfo && !style.formal ? steps.find((step) => step.key === leadInfo.key) : null;
+  const leadSentence = leadStep ? conciseLeadSentence(leadStep, raw[leadStep.key], form, pick(leadInfo.ask)) : null;
+  const bulletKeys = [...steps.filter((step) => step !== leadStep).map((step) => step.key), tailStep && tailStep.key].filter(Boolean);
   const conciseEvidence = {};
   const bullets = bulletKeys.map((key) => {
     const r = renderBullet(raw[key]);
     conciseEvidence[key] = r.evidence;
     return `- ${labelOf(key)}: ${r.text}`;
   });
+  if (leadStep) conciseEvidence[leadStep.key] = cleanValue(raw[leadStep.key]);
   const concise = join([
-    line(greeting, fixed(style.formal ? opener : flow.concise, opener)),
+    line(greeting, leadSentence || fixed(style.formal ? opener : flow.concise, opener)),
     ...bullets,
     profile.sentenceLength === "short" ? null : closing("direct"),
   ]);

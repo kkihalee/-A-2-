@@ -272,6 +272,54 @@ textarea:disabled {
   display: none;
 }
 
+/* 오타 제안 (화면 2) — 자동으로 고치지 않고 사용자가 [고치기]를 누른다 */
+.typo-list {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--color-primary-tint);
+}
+
+.typo-list:empty {
+  display: none;
+}
+
+.typo-title {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: #555;
+}
+
+.typo-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.typo-item + .typo-item {
+  margin-top: 8px;
+}
+
+.typo-text {
+  flex: 1 1 100%;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.typo-text s {
+  color: #888;
+}
+
+.typo-text strong {
+  color: var(--color-primary-text);
+}
+
+.typo-apply {
+  border-color: var(--color-primary);
+  color: var(--color-primary-text);
+}
+
 .check-label {
   display: block;
 }
