@@ -306,13 +306,15 @@ function renderRecipients() {
 }
 
 // 비어 있는 필수 칸만 노란색 + 되묻는 질문(followUp)으로 표시한다.
+// 값이 연결어미("~와서", "~하고")로 끝나 엔진이 정리할 수 없으면 노란색 + "문장 끝을 정리해 주세요" (막지는 않음)
 function updateFieldState(field) {
   const wrap = document.querySelector(`.field[data-key="${field.key}"]`);
   const hint = $(`hint-${field.key}`);
   const missing = field.required && !isFilled(field);
+  const endingFix = !missing && isFilled(field) && needsEndingFix(state.fields[field.key]);
 
-  wrap.classList.toggle("missing", missing);
-  hint.textContent = missing ? state.followups[field.key] || field.followUp : "";
+  wrap.classList.toggle("missing", missing || endingFix);
+  hint.textContent = missing ? state.followups[field.key] || field.followUp : endingFix ? getPath("uiCopy.endingFixHint") : "";
 }
 
 function updateMakeButton() {

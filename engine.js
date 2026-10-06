@@ -75,7 +75,10 @@ function toMemo(stem) {
 function clauseValue(part) {
   const p = part.trim().replace(/[,.]$/, "");
   let m;
-  if ((m = p.match(/^(.+?)(?:이)?(?:인데|이지만|이라서|이어서)$/)) && /(?:중|것|상황|상태|기준|문제|때문)$/.test(m[1])) return `${m[1]}임`;
+  if ((m = p.match(/^(.+?)(?:이)?(?:인데|이고|이지만|이라서|이어서|이라)$/)) && /(?:중|것|상황|상태|기준|문제|때문)$/.test(m[1])) return `${m[1]}임`;
+  if ((m = p.match(/^(.+)와서$/))) return `${m[1]}옴`; // 회신이 안 와서 → 회신이 안 옴
+  if ((m = p.match(/^(.+)워서$/))) return `${m[1]}움`; // 끝내기 어려워서 → 끝내기 어려움
+  if ((m = p.match(/^(.+)봐서$/))) return `${m[1]}봄`; // 확인해 봐서 → 확인해 봄
   if ((m = p.match(/^(.+[^는은])(?:는데|은데|지만)$/))) return toMemo(m[1]);
   if ((m = p.match(/^(.+(?:했|됐|었|았|있|없|겠))(?:는데|지만|어서|어)$/))) return toMemo(m[1]);
   if ((m = p.match(/^(.+)해서$/))) return `${m[1]}함`;
@@ -86,22 +89,30 @@ function clauseValue(part) {
 }
 
 // 문장 연결어 자리에서 한 줄을 조각으로 나눈다. (연결어는 앞 조각에 남긴다)
-const CLAUSE_SPLIT_RE = /(?<=(?:는데|인데|은데|지만|해서|나서|라서|어서|아서|여서|와서|워서|빠서|파서|봐서|돼서|했고|났고|었고|았고|됐고|했어|었어|았어))\s+/;
-// 받는 사람에게 묻고 싶다는 말 자체("선배한테 물어보고 싶어요")는 칸 내용이 아니다
-const META_RE = /(?:선배|인차지|동기|담당자|클라이언트|팀장)(?:님)?(?:한테|에게|께).*(?:물어|여쭤|묻|부탁|말씀|보고)|^(?:물어|여쭤)보고 싶/;
+const CLAUSE_SPLIT_RE = /(?<=(?:는데|인데|은데|지만|해서|나서|라서|어서|아서|여서|와서|워서|빠서|파서|봐서|돼서|했고|났고|었고|았고|됐고|이고|이라|했어|었어|았어))\s+/;
+// 받는 사람에게 묻고 싶다는 꼬리("~ 인차지님께 여쭤보고 싶어요")는 칸 내용이 아니다 → 꼬리만 잘라낸다 (조각을 통째로 지우지 않음 · 2)
+const META_TAIL_RE = /\s*(?:(?:선배|인차지|동기|담당자|클라이언트|팀장)(?:님)?(?:한테|에게|께)\s*)?(?:물어보고|여쭤보고|여쭙고|묻고|말씀드리고|확인받고)\s*싶(?:어요|습니다|어)?$/;
 const ASK_RE = /\?$|(?:나요|까요|가요|ㄹ지|을지|는지|인지|은지)(?:\s*(?:궁금|모르|고민|확인).*)?$/;
 const BLOCK_RE = /안 ?맞|안 ?돼|안 ?됨|못 |모르|막혀|막힘|어렵|헷갈|애매|안 ?와|안 ?옴|없|부족|달라|다름|오류|차이/;
 const TRIED_RE = /해 ?봤|해 ?봄|확인했|시도|찾아봤|비교했|검토했|대사했|읽어 ?봤/;
 const JUDGE_RE = /것 같|같아|생각|보여|보임|맞는 듯/;
 const DONE_RE = /끝났|끝냄|완료|마쳤|정리했|했고|했음|끝$/;
-const DOING_RE = /중(?:이에요|입니다|이야|임)?$|진행 ?중|하고 있/;
+const DOING_RE = /중(?:이에요|입니다|이야|임|인데|이고|이라|이어서)?$|진행 ?중|하고 있/;
 const HELP_RE = /부탁|도와|요청|확인해 ?주|봐 ?주|주실 수|줄 수/;
+// 부탁 한 장: 요청으로 보는 말 · 이유로 보는 말 · 기한을 요청 문장에서 빼지 않는 일정 변경 요청 (3)
+const REQUEST_RE = /싶어요|싶습니다|필요해요|필요합니다|될까요|되나요|될지|되는지|해도|미뤄|연기|변경|받아야|해야|주셨으면/;
+const REASON_RE = /해서|어서|아서|워서|와서|인데|는데/;
+const RESCHEDULE_RE = /미뤄|미루|연기|변경|늦춰|당겨|앞당|옮겨/;
+// 질문 준비실: 조각이 하나뿐이고 이런 말이 있으면 막힌 지점 (7)
+const STUCK_RE = /모르|막히|막혀|막힘|안 ?맞/;
 // 기한 표현: "내일 오전까지", "금요일 18시까지", "이번 주 중으로", "오늘 중"
-const TIME_RE = /(?:오늘|내일|모레|이번 ?주|다음 ?주|금주|차주|[월화수목금토일]요일|\d+일|\d+시)(?:\s?(?:오전|오후|점심|저녁|\d+시|\d+분|[월화수목금토일]요일))*\s?(?:까지|중으로|중|내로|전까지)/;
+// 여러 개면 마지막 것을 기한으로 쓴다 ("오늘 중으로 끝내기 어려워서 내일 오전 10시까지로…" → 내일 오전 10시까지)
+const TIME_RE = /(?:오늘|내일|모레|이번 ?주|다음 ?주|금주|차주|[월화수목금토일]요일|\d+일|\d+시)(?:\s?(?:오전|오후|점심|저녁|\d+시|\d+분|[월화수목금토일]요일))*\s?(?:까지|중으로|중|내로|전까지)/g;
 
-// 칸 하나에 조각을 넣는다 (이미 찬 칸은 건드리지 않는다)
+// 칸 하나에 조각을 넣는다. 이미 찬 칸이면 버리지 않고 ", "로 이어 붙인다 (입력 유실 방지 · 1)
 function put(fields, key, value) {
-  if (key in fields && !fields[key] && value) fields[key] = value;
+  if (!(key in fields) || !value) return;
+  fields[key] = fields[key] ? `${fields[key]}, ${value}` : value;
 }
 
 function splitByRules(card, input) {
@@ -112,11 +123,13 @@ function splitByRules(card, input) {
   const parts = String(input)
     .split(/[.!]\s+|\n/)
     .flatMap((s) => s.split(CLAUSE_SPLIT_RE))
-    .map((s) => s.trim())
-    .filter((s) => s && !META_RE.test(s));
+    .map((s) => s.trim().replace(META_TAIL_RE, "").trim())
+    .filter(Boolean);
   if (!parts.length) return fields;
 
-  if (card.id === "question") {
+  if (card.id === "question" && parts.length === 1 && STUCK_RE.test(parts[0]) && !ASK_RE.test(parts[0])) {
+    put(fields, "blocker", clauseValue(parts[0])); // "리스 회계처리 모르겠어요" → 막힌 지점 (7)
+  } else if (card.id === "question") {
     parts.forEach((part, i) => {
       const value = clauseValue(part);
       const askPart = part.replace(/\s*(?:궁금해요|궁금합니다|모르겠어요|모르겠습니다|고민돼요|고민입니다|확인하고 싶어요|확인하고 싶습니다)$/, "").trim();
@@ -129,16 +142,18 @@ function splitByRules(card, input) {
       else put(fields, "blocker", value);
     });
   } else if (card.id === "request") {
-    const time = String(input).match(TIME_RE);
-    if (time) put(fields, "deadline", time[0].trim());
+    const times = String(input).match(TIME_RE) || [];
+    const deadline = times.length ? times[times.length - 1].trim() : null;
+    if (deadline) put(fields, "deadline", deadline);
     parts.forEach((part) => {
-      if (HELP_RE.test(part) || /싶어요|싶습니다|필요해요|필요합니다|될까요|되나요/.test(part)) {
+      if (HELP_RE.test(part) || REQUEST_RE.test(part)) {
         // "금요일까지 원장을 보내주실 수 있나요" → 기한 칸에 넣은 말은 요청 내용에서 뺀다
-        const request = fields.deadline ? part.replace(fields.deadline, "").replace(/\s{2,}/g, " ").trim() : part;
+        // 단, 일정을 미루거나 바꾸는 요청은 기한이 요청의 내용이므로 그대로 둔다 ("내일 오전 10시까지로 미뤄도 될지")
+        const keepTime = !deadline || RESCHEDULE_RE.test(part);
+        const request = keepTime ? part : part.replace(deadline, "").replace(/\s{2,}/g, " ").trim();
         put(fields, "request", request || part);
-      }
-      else if (/때문에/.test(part)) put(fields, "reason", part.slice(0, part.indexOf("때문에")).trim()); // "회의 때문에 바빠서" → "회의"
-      else if (/해서|어서|아서|인데|는데/.test(part) && clauseValue(part) !== part.trim()) put(fields, "reason", clauseValue(part)); // 메모체로 바꿀 수 있을 때만
+      } else if (/때문에/.test(part)) put(fields, "reason", part.slice(0, part.indexOf("때문에")).trim()); // "회의 때문에 바빠서" → "회의"
+      else if (REASON_RE.test(part) && clauseValue(part) !== part.trim()) put(fields, "reason", clauseValue(part)); // 메모체로 바꿀 수 있을 때만
     });
   } else if (card.id === "status") {
     parts.forEach((part) => {
@@ -277,6 +292,11 @@ function toPredicate(value, form, fact) {
   const stem = value.slice(0, -rule.suffix.length);
   let text;
   if (rule.copula) text = stem + resolveParticle("입니다", stem, form);
+  else if (rule.bieup) {
+    // ㅂ 불규칙: 어려움 → 어렵습니다 / 어려워요 / 어려워
+    const last = stem.slice(-1);
+    text = form === 0 ? `${stem.slice(0, -1)}${withJong(last, 17)}습니다` : `${stem}워${form === 1 ? "요" : ""}`;
+  }
   else if (rule.stem) text = form === 0 ? `${stem}습니다` : convertDeclarative(`${stem}습니다`, form) || `${stem}습니다`;
   else text = stem + (fact && rule.fact ? rule.fact : rule.forms)[form];
   return { text, evidence: commonPrefix(value, text) };
@@ -520,9 +540,29 @@ function unifyTone(text, form) {
   return polishText(convertTone(text, form), form);
 }
 
-// 맞춤법·띄어쓰기(content.js SPELLING_FIXES)와 존댓말 1인칭(나 → 저)을 고친다. 내용은 바꾸지 않는다.
+// 맞춤법 사전(SPELLING_DICT · 모두)과 구어체 사전(COLLOQUIAL_DICT · 존댓말 받는 사람만)
+const dictsFor = (form) => (form === 2 ? SPELLING_DICT : [...SPELLING_DICT, ...COLLOQUIAL_DICT]);
+
+// 사전으로 바뀌는 표현 목록 [[원래, 바뀐 것], …] (수정 이유에 알려 준다 · 9·10)
+function dictChanges(text, form) {
+  const out = [];
+  dictsFor(form).forEach(([re, to]) => {
+    const once = new RegExp(re.source, re.flags.replace("g", ""));
+    (String(text).match(re) || []).forEach((hit) => {
+      const from = hit.trim();
+      const changed = hit.replace(once, to).trim();
+      if (from !== changed && !out.some(([f]) => f === from)) out.push([from, changed]);
+    });
+  });
+  return out;
+}
+
+// 맞춤법·띄어쓰기(content.js SPELLING_FIXES)·맞춤법/구어체 사전과 존댓말 1인칭(나 → 저)을 고친다. 뜻은 바꾸지 않는다.
 function polishText(text, form) {
   let out = text;
+  dictsFor(form).forEach(([re, to]) => {
+    out = out.replace(re, to);
+  });
   SPELLING_FIXES.forEach(([re, to]) => {
     out = out.replace(re, to);
   });
@@ -578,11 +618,56 @@ function choose(entry, variation) {
   return isChoices(entry) ? entry[(variation || 0) % entry.length] : entry;
 }
 
+// 칸 값이 연결어미로 끝나면 메모체로 바꾼다 ("회신이 안 와서" → "회신이 안 옴" · 4). 바꿀 수 없으면 그대로.
+function fixEnding(value) {
+  const v = cleanValue(value);
+  return CONNECTIVE_END_RE.test(v) ? clauseValue(v) : value;
+}
+// 화면 2 안내용: 연결어미로 끝나는데 엔진이 메모체로 바꿀 수 없는 값 (노란 칸 + "문장 끝을 정리해 주세요")
+function needsEndingFix(value) {
+  const v = cleanValue(value);
+  return Boolean(v) && CONNECTIVE_END_RE.test(v) && clauseValue(v) === v;
+}
+
+// 선택지 정리 (11): 줄바꿈·①②·"또는"·쉼표로 나눈 항목. 항목 끝 마침표는 뺀다.
+function optionItems(value) {
+  const v = String(value || "").trim();
+  let items;
+  if (/\n|[①②③④⑤]/.test(v)) items = v.split(/\n|(?=[①②③④⑤])/);
+  else if (/\s또는\s/.test(v)) items = v.split(/\s또는\s/);
+  else if (/,\s/.test(v)) items = v.split(/,\s*/);
+  else items = [v];
+  return items.map((s) => s.replace(/^\s*(?:[①②③④⑤]|\d+[.)]|[-•·])\s*/, "").replace(/[.。\s]+$/, "").trim()).filter(Boolean);
+}
+// 문장용: "① A, ② B 두 가지" · 목록용(더 간결하게): "① A, ② B"
+function optionText(value, withCount) {
+  const items = optionItems(value);
+  if (items.length < 2) return items[0] || String(value || "").trim();
+  const list = items.map((item, i) => `${OPTION_MARKS[i] || `${i + 1})`} ${item}`).join(", ");
+  return withCount && OPTION_COUNT[items.length] ? `${list} ${OPTION_COUNT[items.length]}` : list;
+}
+
+// 질문을 "~지" 꼴로: "대체적 절차로 넘어가야 할까요?" → "대체적 절차로 넘어가야 할지" (바꿀 수 없으면 null · 8·12)
+function askToJi(value) {
+  const v = cleanValue(value);
+  if (classifyValue(v) === "ji") return v.replace(/\?+$/, "");
+  const rule = ASK_TO_JI.find(([re]) => re.test(v));
+  return rule ? v.replace(rule[0], rule[1]) : null;
+}
+
 // 칸 하나를 문장으로. 완성 문장·질문은 그대로 두고(끝맺음은 마지막 단계에서 맞춘다), 나머지는 알맞은 문장 틀에 끼운다.
-function renderStep(step, raw, form, variation) {
+// noConnector: 본문 첫 문장이라 "다만" 같은 대조 연결어를 붙이지 않을 때
+function renderStep(step, raw, form, variation, noConnector) {
+  // ", "로 이어 붙인 값(구조화에서 한 칸에 두 조각이 들어간 경우)은 조각마다 문장으로 만든다 (1)
+  const parts = String(raw).split(/,\s+/);
+  if (parts.length > 1 && parts.every((part) => ["memo", "sentence", "question"].includes(classifyValue(cleanValue(part))))) {
+    const first = renderStep(step, parts[0], form, variation, noConnector);
+    const rest = parts.slice(1).map((part) => renderStep({ key: step.key, opinion: step.opinion }, part, form, variation, true).text);
+    return { text: [first.text, ...rest].join(" "), evidence: first.evidence };
+  }
   const shape = classifyValue(raw);
   // "특별히 막힌 점은 없습니다"처럼 '없음'을 말하는 값에는 "다만" 같은 연결어를 붙이지 않는다.
-  const connector = MEANS_NONE_RE.test(String(raw).trim()) ? "" : pickForm(choose(step.connector, variation), form);
+  const connector = noConnector || MEANS_NONE_RE.test(String(raw).trim()) ? "" : pickForm(choose(step.connector, variation), form);
   if (shape === "sentence" || shape === "question") {
     const value = String(raw).trim();
     // 질문은 물음표로, 나머지는 마침표로 끝낸다 (질문 뒤에 "입니다"·요청 틀을 붙이지 않는다)
@@ -670,10 +755,19 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   const join = (lines) => lines.filter(Boolean).join("\n");
 
   // 채워진 칸만 쓴다. 비어 있는 칸은 문장에서도 빠진다. (B1)
+  // 연결어미로 끝난 값은 메모체로 바꾸고(4), 선택지는 "① A, ② B 두 가지"로 정리한다(11).
   const raw = {};
+  const bulletRaw = {};
   card.fields.forEach((field) => {
     const value = String(fields[field.key] || "").trim();
-    if (value) raw[field.key] = value;
+    if (!value) return;
+    if (field.key === "options") {
+      raw.options = optionText(value, true);
+      bulletRaw.options = optionText(value, false);
+    } else {
+      raw[field.key] = fixEnding(value);
+      bulletRaw[field.key] = raw[field.key];
+    }
   });
 
   // 인차지는 결론 칸을 맨 앞으로
@@ -684,19 +778,42 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   }
   const tailStep = flow.tail && raw[flow.tail.key] ? flow.tail : null;
 
-  const evidence = {};
-  const body = steps
-    .map((step) => {
-      const r = renderStep(step, raw[step.key], form, variation);
-      evidence[step.key] = r.evidence;
-      return r.text;
-    })
-    .join(" ");
-  let tail = null; // 질문 준비실은 '묻고 싶은 것'을 마지막 문장에 그대로 (B2)
+  // 본문: 칸마다 한 문장. 본문 첫 문장이 대조 연결어("다만")로 시작하지 않게 한다.
+  // softSteps: '더 부드럽게' 탭은 content.js SOFT_STEPS의 틀을 같은 칸 위에 덮어쓴다 (8)
+  const softSteps = SOFT_STEPS[card.id] || {};
+  const renderBody = (useSoft) => {
+    const ev = {};
+    const text = steps
+      .map((step, i) => {
+        const s = useSoft && softSteps[step.key] ? { ...step, ...softSteps[step.key] } : step;
+        const r = renderStep(s, raw[step.key], form, variation, i === 0 && step.contrast);
+        ev[step.key] = r.evidence;
+        return r.text;
+      })
+      .join(" ");
+    return { text, ev };
+  };
+  const mineBody = renderBody(false);
+  const softBody = renderBody(true);
+  const body = mineBody.text;
+  const evidence = mineBody.ev;
+  const softEvidence = softBody.ev;
+
+  // 질문 준비실은 '묻고 싶은 것'을 마지막 문장에 (B2). '더 부드럽게'는 "~할지 여쭤봐도 괜찮을까요?"로 (바꿀 수 있을 때)
+  const askJi = tailStep ? askToJi(raw[tailStep.key]) : null;
+  let tail = null;
+  let softTail = null;
   if (tailStep) {
     const r = renderStep(tailStep, raw[tailStep.key], form, variation);
     evidence[tailStep.key] = r.evidence;
     tail = r.text;
+    if (askJi && softSteps.softAsk) {
+      softTail = pick(softSteps.softAsk).replace("{j}", askJi);
+      softEvidence[tailStep.key] = askJi;
+    } else {
+      softTail = tail;
+      softEvidence[tailStep.key] = r.evidence;
+    }
   }
 
   // 요청 끝인사: 요청을 담은 칸이 명사구로 채워졌을 때만. 급한 기한이면 여유 있는 말을 뺀 끝인사. (B1)
@@ -708,7 +825,10 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   const closing = (styleKey) => (allowClosing ? fixed(closings[styleKey], closings.direct) : null);
   const extra = profile.sentenceLength === "detailed" && form !== 2 ? fixed(MESSAGE_EXTRA) : null;
   const greeting = recipient.honorific ? fixed(style.greeting.replace("{h}", recipient.honorific)) : "";
-  const opener = style.formal ? flow.formalOpener : flow.opener[requestStyle] || flow.opener.soft;
+  const baseOpener = style.formal ? flow.formalOpener : flow.opener[requestStyle] || flow.opener.soft;
+  // 인차지에게 질문 준비실: 첫 줄에 용건("~할지 여쭤볼 게 있습니다")을 먼저 밝힌다. 나머지 순서는 그대로 (12)
+  const leadAsk = card.id === "question" && style.leadFirst && askJi ? LEAD_ASK_OPENER.map((tpl) => tpl.replace("{j}", askJi)) : null;
+  const opener = leadAsk || baseOpener;
 
   // 내 말투안: 칸마다 한 문장 → (충분히 설명) → 질문 → 끝인사
   const mine = join([
@@ -723,12 +843,12 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   const bulletKeys = [...steps.map((step) => step.key), tailStep && tailStep.key].filter(Boolean);
   const conciseEvidence = {};
   const bullets = bulletKeys.map((key) => {
-    const r = renderBullet(raw[key]);
+    const r = renderBullet(bulletRaw[key]);
     conciseEvidence[key] = r.evidence;
     return `- ${labelOf(key)}: ${r.text}`;
   });
   const concise = join([
-    line(greeting, fixed(style.formal ? opener : flow.concise, opener)),
+    line(greeting, fixed(style.formal || leadAsk ? opener : flow.concise, opener)),
     ...bullets,
     profile.sentenceLength === "short" ? null : closing("direct"),
   ]);
@@ -736,17 +856,31 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   // 더 부드럽게: 배려하는 첫 문장 + 한 단계 더 부드러운 끝인사
   // 인차지(결론 먼저)에게는 첫 줄을 한 문장으로: 두 문장짜리 배려 인사는 결론을 뒤로 밀어낸다
   const softOpener = style.leadFirst && isChoices(flow.soft) ? flow.soft.filter((c) => splitSentences(pick(c)).length === 1) : flow.soft;
-  const soft = join([line(greeting, fixed(softOpener.length ? softOpener : flow.soft, opener)), body, extra, tail, closing(softer[requestStyle])]);
+  const softFirst = leadAsk ? fixed(leadAsk) : fixed(softOpener.length ? softOpener : flow.soft, opener);
+  const soft = join([line(greeting, softFirst), softBody.text, extra, softTail, closing(softer[requestStyle])]);
 
   // 수정 이유: cards.json reasons에서 채워진 칸·탭·받는 사람에 맞는 문구만 골라 최대 3줄 (B3)
   const copy = typeof DATA !== "undefined" && DATA && DATA.reasons;
   const filled = (key) => raw[key] && !MEANS_NONE_RE.test(raw[key]);
+  // 사전으로 바꾼 표현이 있으면 "'빡세서'를 '빠듯해서'로 다듬었어요."처럼 한 줄 (9·10 · 칸 줄 대신)
+  const changes = dictChanges(Object.values(raw).join("\n"), form);
+  const dictLine =
+    copy && copy.polished && changes.length
+      ? copy.polished.replace(
+          "{changes}",
+          changes
+            .slice(0, 2)
+            .map(([from, to]) => `'${from}'${resolveParticle("을를", from, form)} '${to}'${resolveParticle("으로로", to, form)}`)
+            .join(", "),
+        )
+      : null;
   const reasonsFor = (tab, index) => {
     if (!copy) return [];
     const matches = ((copy.byField || {})[card.id] || []).filter((r) => r.requires.every(filled));
     const fieldLine = matches.length ? matches[Math.min(index, matches.length - 1)].text : null;
-    const lastLine = removed.size ? copy.avoid.replace("{words}", [...removed].join(", ")) : (copy.byPartner || {})[recipient.id];
-    return [(copy.byTab || {})[tab], fieldLine, lastLine].filter(Boolean).slice(0, 3);
+    const partnerLine = leadAsk && copy.leadIntro ? copy.leadIntro : (copy.byPartner || {})[recipient.id];
+    const lastLine = removed.size ? copy.avoid.replace("{words}", [...removed].join(", ")) : partnerLine;
+    return [(copy.byTab || {})[tab], dictLine || fieldLine, lastLine].filter(Boolean).slice(0, 3);
   };
 
   // 마지막 단계: 탭 3종 모두 문장을 나눠 끝맺음을 정한 문체 하나로 맞추고, 근거 구절을 바뀐 본문에 맞춘다.
@@ -757,7 +891,7 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   const variants = [
     { type: "mine", ...finish(mine, evidence), reasons: reasonsFor("mine", 0) },
     { type: "concise", ...finish(concise, conciseEvidence), reasons: reasonsFor("concise", 1) },
-    { type: "soft", ...finish(soft, evidence), reasons: reasonsFor("soft", 2) },
+    { type: "soft", ...finish(soft, softEvidence), reasons: reasonsFor("soft", 2) },
   ];
   return { variants, reasons: variants[0].reasons };
 }
