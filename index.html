@@ -6,7 +6,7 @@
   <title>말결</title>
   <!-- 글꼴: Pretendard (코딩 레퍼런스 2장) · 못 불러오면 기본 글꼴 -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css">
-  <link rel="stylesheet" href="style.css?v=20261006-2">
+  <link rel="stylesheet" href="style.css?v=20261006-3">
   <link rel="stylesheet" href="review.css">
 </head>
 <body>
@@ -46,6 +46,9 @@
     <h1 data-copy="uiCopy.structureTitle"></h1>
     <p class="summary"><strong id="structure-card"></strong> · <span id="structure-input"></span></p>
 
+    <!-- '* 표시는 꼭 채워야 해요' 안내는 받는 사람(필수)보다 위에 둔다 (10/06) -->
+    <p class="block-desc" data-copy="uiCopy.fieldsHint"></p>
+
     <section class="block">
       <h2 class="block-title"><span data-copy="uiCopy.partnerLabel"></span> <span class="required">*</span></h2>
       <div class="chips" id="recipient-list"></div>
@@ -53,7 +56,6 @@
 
     <section class="block">
       <h2 class="block-title" data-copy="uiCopy.fieldsLabel"></h2>
-      <p class="block-desc" data-copy="uiCopy.fieldsHint"></p>
       <div id="field-list"></div>
       <p class="security-note" data-copy="uiCopy.confidentialNotice"></p>
     </section>
@@ -135,9 +137,9 @@
     <span>화면 바로가기</span>
   </nav>
 
-  <script src="content.js?v=20261006-2"></script>
-  <script src="engine.js?v=20261006-2"></script>
-  <script src="main.js?v=20261006-2"></script>
+  <script src="content.js?v=20261006-3"></script>
+  <script src="engine.js?v=20261006-3"></script>
+  <script src="main.js?v=20261006-3"></script>
   <script src="review.js"></script>
 </body>
 </html>

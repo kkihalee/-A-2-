@@ -98,7 +98,7 @@ const META_TAIL_RE = /\s*(?:(?:선배|인차지|동기|담당자|클라이언트
 // 부탁 카드에서 요청으로 보는 말 (받아야 · 해야 · 될지 · 미뤄 …)
 const REQUEST_HINT_RE = /될지|되는지|될까|되나|해도|미뤄|미룰|받아야|해야|어야|아야|주실|줄 수|싶어|싶습/;
 const ASK_RE = /\?$|(?:나요|까요|가요|ㄹ지|을지|는지|인지|은지)(?:\s*(?:궁금|모르|고민|확인).*)?$/;
-const BLOCK_RE = /안 ?맞|안 ?돼|안 ?됨|못 |모르|막혀|막힘|어렵|헷갈|애매|안 ?와|안 ?옴|없|부족|달라|다름|오류|차이/;
+const BLOCK_RE = /안 ?맞|안 ?돼|안 ?됨|못|모르|막혀|막힘|어렵|헷갈|애매|안 ?와|안 ?옴|없|부족|달라|다름|오류|차이/;
 const TRIED_RE = /해 ?봤|해 ?봄|확인했|시도|찾아봤|비교했|검토했|대사했|읽어 ?봤/;
 const JUDGE_RE = /것 같|같아|생각|보여|보임|맞는 듯/;
 const DONE_RE = /끝났|끝냄|완료|마쳤|정리했|했고|했음|끝$/;
@@ -135,6 +135,7 @@ function splitByRules(card, input) {
     fields[field.key] = null;
   });
   const parts = String(input)
+    .replace(/\s*(?:[ㅋㅎㅠㅜ]{2,}|;;+)/g, "") // ㅋㅋ ㅠㅠ ;; 는 칸에 넣지 않는다 (10/06)
     .split(/[.!]\s+|\n/)
     .flatMap((s) => s.split(CLAUSE_SPLIT_RE))
     .map((s) => s.replace(META_TAIL_RE, "").trim())
@@ -388,12 +389,18 @@ const JI_END_RE = /(?:는지|은지|인지|한지|할지|을지|일지|던지|�
 // 물음표가 없어도 질문 끝(~나요 · ~까요 · ~습니까)이면 질문으로 본다 ("어떻게 해야하나요" → 질문)
 const QUESTION_END_RE = /(?:나요|까요|가요|니까|는지요|을까|ㄹ까)$/;
 
+// "벅차요"처럼 받침 없는 글자 + 요로 끝나면 해요체 문장 (필요·중요는 받침이 있어 제외 · 수요·개요 같은 낱말도 제외 · 10/06)
+function isHaeyoEnd(body) {
+  const m = String(body).match(/([가-힣])요$/);
+  return Boolean(m) && jongOf(m[1]) === 0 && !"수개소주강".includes(m[1]);
+}
+
 function classifyValue(value) {
   const v = String(value).trim();
   if (/\?$/.test(v) || QUESTION_END_RE.test(v.replace(/[.!\s]+$/, ""))) return "question";
   const body = v.replace(/[.!\s]+$/, "");
   if (JI_END_RE.test(body)) return "ji";
-  if (/[.!]$/.test(v) || SENTENCE_END_RE.test(body)) return "sentence";
+  if (/[.!]$/.test(v) || SENTENCE_END_RE.test(body) || isHaeyoEnd(body)) return "sentence";
   if (memoRuleFor(body)) return "memo";
   return "noun";
 }
@@ -700,9 +707,32 @@ function conciseLeadSentence(step, raw, form, ask) {
     const haeyo = toPredicate(value, 1, true).text;
     if (/요$/.test(haeyo) && !/(?:(?:었|았|했|됐|봤|였|겠)어|이에|예)요$/.test(haeyo)) return `${haeyo.slice(0, -1)}서 ${ask}.`;
   }
+  // 해요체 문장("결산이 벅차요")은 "~서"로 이어 붙인다 (과거형 '~었어요'는 어색해서 제외)
+  if (shape === "sentence" && isHaeyoEnd(value) && !/(?:었|았|했|됐|였|겠)어요$/.test(value)) return `${value.slice(0, -1)}서 ${ask}.`;
   if (shape === "noun") return `${value} 관련해서 ${ask}.`;
   if (shape === "ji") return `${value} 궁금해서 ${ask}.`;
   return `${renderStep(step, raw, form, 0).text} ${ask}.`;
+}
+
+// ---------- 겹치는 내용 줄이기 ----------
+// 앞에서 이미 쓴 칸들(earlier)과 앞부분 낱말이 REPEAT_MIN_WORDS개 이상 같으면, 마지막 같은 낱말부터만 남긴다.
+// isAsk: '묻고 싶은 것'이 앞 칸 말을 그대로 되풀이하면(남는 말이 한 낱말 이하) ASK_REFER로 대신한다.
+function trimRepeat(value, earlier, isAsk, form) {
+  const text = String(value);
+  if (text.includes(FIELD_JOIN)) return text;
+  const words = text.trim().split(/\s+/);
+  const norm = (w) => w.replace(/[.,!?]/g, "");
+  let best = 0;
+  earlier.forEach((u) => {
+    const uw = String(u).trim().split(/\s+/);
+    let k = 0;
+    while (k < words.length && k < uw.length && norm(words[k]) === norm(uw[k])) k += 1;
+    best = Math.max(best, k);
+  });
+  if (best < REPEAT_MIN_WORDS) return text;
+  if (isAsk && words.length - best <= 1) return pickForm(ASK_REFER, form);
+  if (best >= words.length) return text; // 통째로 같은 칸은 지우지 않는다
+  return words.slice(best - 1).join(" ");
 }
 
 // ---------- 구어체 순화 (상급자에게 보낼 때) ----------
@@ -852,6 +882,15 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   }
   const tailStep = flow.tail && raw[flow.tail.key] ? flow.tail : null;
 
+  // 겹치는 내용 줄이기: 쓰는 순서대로 보면서 앞 칸과 앞부분이 같은 말은 줄인다 (10/06)
+  // 기한 검사는 원래 값(raw)으로, 문장에는 줄인 값(shown)을 쓴다.
+  const shown = { ...raw };
+  const seenValues = [];
+  [...steps.map((step) => step.key), tailStep && tailStep.key].filter(Boolean).forEach((key) => {
+    shown[key] = trimRepeat(raw[key], seenValues, tailStep && key === tailStep.key, form);
+    seenValues.push(raw[key]);
+  });
+
   // 요청 내용에 기한이 이미 들어 있으면("10시까지로 미뤄도 될지") 기한 문장을 따로 쓰지 않는다 (10/06)
   const deadlineInRequest = raw.deadline && raw.request && raw.request.includes(raw.deadline);
 
@@ -860,14 +899,14 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
     steps
       .filter((step) => !(step.key === "deadline" && deadlineInRequest && ((ev.deadline = raw.deadline), true)))
       .map((step, i) => {
-        const r = renderStep({ ...step, ...(override[step.key] || {}) }, raw[step.key], form, variation, { noConnector: i === 0 });
+        const r = renderStep({ ...step, ...(override[step.key] || {}) }, shown[step.key], form, variation, { noConnector: i === 0 });
         ev[step.key] = r.evidence;
         return r.text;
       })
       .join(" ");
   const renderTail = (ev, override) => {
     if (!tailStep) return null; // 질문 준비실은 '묻고 싶은 것'을 마지막 문장에 그대로 (B2)
-    const r = renderStep({ ...tailStep, ...(override || {}) }, raw[tailStep.key], form, variation);
+    const r = renderStep({ ...tailStep, ...(override || {}) }, shown[tailStep.key], form, variation);
     ev[tailStep.key] = r.evidence;
     return r.text;
   };
@@ -902,7 +941,7 @@ async function generateMessages({ card, fields, recipient, profile }, options = 
   const bulletKeys = [...steps.filter((step) => step !== leadStep).map((step) => step.key), tailStep && tailStep.key].filter(Boolean);
   const conciseEvidence = {};
   const bullets = bulletKeys.map((key) => {
-    const r = renderBullet(raw[key]);
+    const r = renderBullet(shown[key]);
     conciseEvidence[key] = r.evidence;
     return `- ${labelOf(key)}: ${r.text}`;
   });
